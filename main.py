@@ -1,52 +1,55 @@
 import cv2
-import mediapipe as mp
 import pyautogui
+from HandTracker import HandTracker
+from MouseController import MouseController
+import time
 
-
-#Opens the camera from computer
+# Set up
 cap = cv2.VideoCapture(1)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
-#detects its landmark
-hand_detector = mp.solutions.hands.Hands()
-#draws on everylandmark
-drawing_utils = mp.solutions.drawing_utils
-# screen you are working with
-screen_width, screen_height = pyautogui.size()
+screen_w, screen_h = pyautogui.size()
+tracker = HandTracker()
+mouse = MouseController(screen_w, screen_h)
 
-#comparison with space to thumb
-index_y = 0
-#keep going until
+# FPS tracking
+prev_time = time.time()
+
 while True:
-    #ignore first value it checks if connection was good (ret), record frame telling us sucessfull connection
-    _, frame = cap.read()
-    # flip frame
-    frame = cv2.flip(frame, 1)
-    frame_height, frame_width, _ = frame.shape
-    rgb_frame = cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
-    output = hand_detector.process(rgb_frame)
-    hands = output.multi_hand_landmarks
-    if hands:
-        for hand in hands:
-            drawing_utils.draw_landmarks(frame, hand)
-            landmarks = hand.landmark
-            for id, landmark in enumerate(landmarks):
-                x = int(landmark.x * frame_width)
-                y = int(landmark.y * frame_height)
-                if id == 8:
-                    cv2.circle(img=frame, center=(x, y), radius=10, color=(0, 255, 255))
-                    index_x = screen_width / frame_width * x
-                    index_y = screen_height / frame_height * y
+    ret, frame = cap.read()
+    if not ret:
+        print("❌ Camera not connected")
+        break
 
-                if id == 4:
-                    cv2.circle(img=frame, center=(x, y), radius=10, color=(0, 255, 255))
-                    thumb_x = screen_width / frame_width * x
-                    thumb_y = screen_height / frame_height * y
-                    print('outside', abs(index_y - thumb_y))
-                    if abs(index_y - thumb_y) < 20:
-                        pyautogui.click()
-                        #pyautogui.sleep(1)
-                    elif abs(index_y - thumb_y) < 100:
-                        pyautogui.moveTo(index_x, index_y)
-    #name window, what am i showing
-    cv2.imshow("Virtual Mouse",frame)
-    cv2.waitKey(1)
+    frame = cv2.flip(frame, 1)
+    h, w, _ = frame.shape
+
+    hands = tracker.find_hands(frame)
+
+    if hands:
+        tracker.draw_landmarks(frame, hands)
+        for hand in hands:
+            landmarks = tracker.get_landmark_positions(hand, w, h)
+            index_finger = landmarks[8]
+            thumb = landmarks[4]
+
+            mouse.move(index_finger[0], index_finger[1], w, h)
+            mouse.click_if_close(index_finger, thumb, w, h)
+
+            cv2.circle(frame, index_finger, 8, (0, 255, 255), -1)
+            cv2.circle(frame, thumb, 8, (255, 0, 255), -1)
+
+    # FPS Display
+    curr_time = time.time()
+    fps = int(1 / (curr_time - prev_time))
+    prev_time = curr_time
+    cv2.putText(frame, f'FPS: {fps}', (20, 60),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+    cv2.imshow("Virtual Mouse", frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
